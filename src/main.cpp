@@ -1,4 +1,5 @@
 //#include "config.h"       //would it make sense to have a config file with the defines?
+#include <Arduino.h>
 
 #include <WiFi.h>
 #include <WiFiUdp.h>
