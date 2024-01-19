@@ -772,7 +772,7 @@ void readTime(void* parameter)
         // ///Disable motion for night
         if(!nightTime)
         {
-          if((timeinfo.tm_hour < lightsOn) && (timeinfo.tm_hour > lightsOut))
+          if((timeinfo.tm_hour <= lightsOn) && (timeinfo.tm_hour >= lightsOut))
           {
             nightTime = 1;
             debugln("NightTime");
@@ -782,7 +782,7 @@ void readTime(void* parameter)
         // //enable motion for day
         else if(nightTime)
         {
-          if((timeinfo.tm_hour >= lightsOn) && (timeinfo.tm_hour <= lightsOut))
+          if((timeinfo.tm_hour > lightsOn) && (timeinfo.tm_hour < lightsOut))
           {
             nightTime = 0;
             debugln("day");
