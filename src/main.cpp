@@ -1,4 +1,5 @@
 //#include "config.h"       //would it make sense to have a config file with the defines?
+
 #include <WiFi.h>
 #include <WiFiUdp.h>
 
@@ -80,6 +81,7 @@ volatile int lightTimeout = 0;
 
 static int lightsOn = 7;
 static int lightsOut = 23;
+int timeHour;
 
 // Task handles
 static TaskHandle_t light_Task = NULL;
@@ -87,7 +89,6 @@ static TaskHandle_t light_On_Inter = NULL;
 static TaskHandle_t fan_Task = NULL;
 static TaskHandle_t ambientLightCheck_Task = NULL;
 static TaskHandle_t timeCheck_Task = NULL;
-static TaskHandle_t updateDisplay_Task = NULL;
 static TaskHandle_t Wifi_Task = NULL;
 //static TaskHandle_t light_Off_Trigger = NULL;
 static TaskHandle_t read_Time = NULL;
@@ -112,8 +113,8 @@ IPAddress secondaryDNS(8, 8, 4, 4); //optional
 void IRAM_ATTR interruptHandler1()              //Motion sensor pin drives interrupt routine
 {              
   BaseType_t xtr = pdFALSE;
-  
-  if (light && !nightTime) 
+
+  if (light) 
   {
     lightTimeout = ten_Min_To_Sec-1;             //Keep light on if motion detected
   }
@@ -123,15 +124,6 @@ void IRAM_ATTR interruptHandler1()              //Motion sensor pin drives inter
     vTaskResume(light_On_Inter);
   } 
   portYIELD_FROM_ISR(xtr);
-}
-
-void updateDisplayTask(void* parameter) 
-{
-  while (1) 
-  {
-    vTaskDelay(oneSecond);
-  }
-  vTaskDelete(NULL);                        //Task delete if error
 }
 
 void setup() 
@@ -144,7 +136,7 @@ void setup()
 
   attachInterrupt(digitalPinToInterrupt(motionSensor), interruptHandler1, FALLING);
   //immediately detach
-  detachInterrupt(digitalPinToInterrupt(motionSensor));
+  //detachInterrupt(digitalPinToInterrupt(motionSensor));
   Serial.begin(115200);
   Serial2.begin(115200, SERIAL_8N1, RXD2, TXD2);
   WiFi.mode(WIFI_STA);
@@ -160,6 +152,12 @@ void setup()
   Serial.print("Connecting to ");
   Serial.println(ssid);
 
+  // WiFi.begin(ssid, password);
+  // while (WiFi.status() != WL_CONNECTED) {
+  //   vTaskDelay(500);
+  //   Serial.print(".");
+  // }
+  // Print local IP address and start web server
   Serial.println("");
   Serial.println("WiFi connected.");
   Serial.println("IP address: ");
@@ -171,7 +169,6 @@ void setup()
   xTaskCreate(fanTask, "Fan Task", 1000, NULL, 1, &fan_Task);
   vTaskSuspend(fan_Task);
   xTaskCreate(lightTask, "Light Task", 2000, NULL, 1, &light_Task);
-  xTaskCreate(updateDisplayTask, "Update Display Task", 1000, NULL, 1, &updateDisplay_Task);
   xTaskCreate(lightOnInter, "Switch light On Int", 1500, NULL, 1, &light_On_Inter);
 //  xTaskCreate(lightOffTrigger, "Switch light Off", 1500, NULL, 1, &light_Off_Trigger);
   xTaskCreate(readTime, "upDate Time", 4000, NULL, 1, &read_Time);
@@ -182,8 +179,6 @@ void setup()
   //Suspend Tasks
 
   vTaskSuspend(light_On_Inter);
-  //vTaskSuspend(read_Time);
-  vTaskSuspend(updateDisplay_Task);
 
   bme.begin(0x76);
 
@@ -253,6 +248,8 @@ void connect_to_MQTT()
     MQTTclient.subscribe((base_mqtt_topic + "/GTB").c_str());   // Watch the .../LED topic for incoming MQTT messages 
     MQTTclient.subscribe((base_mqtt_topic + "/dLampfb").c_str());
     MQTTclient.subscribe((base_mqtt_topic + "/mLampfb").c_str());
+    MQTTclient.subscribe((mqtt_topic_Outlight + "/mainDoorfb").c_str());   // Watch the .../LED topic for incoming MQTT messages
+    MQTTclient.subscribe((mqtt_topic_upOutlight + "/upDoorfb").c_str());   // Watch the .../LED topic for incoming MQTT messages
  
      // Add other watched topics in here...  <--------------------- THIS IS THE BIT THAT YOU'LL FORGET TO DO!!
 
@@ -408,13 +405,37 @@ void MQTTcallback(char* topic, byte* payload, unsigned int length)
     }
   }
   
+  else if (msg_topic==mqtt_topic_Outlight + "/mainDoorfb" )
+  {
+    //debugln("LowerOD");
+    if(msg_payload == "0")
+    {
+      WriteNum("page2.lowerOD.picc",13);
+    }
+    if(msg_payload == "1")
+    {
+      WriteNum("page2.lowerOD.picc",14);
+    }
+  }
+
+  else if (msg_topic==mqtt_topic_upOutlight + "/upDoorfb" )
+  {
+    //debugln("LowerOD");
+    if(msg_payload == "0")
+    {
+      WriteNum("page2.upperOD.picc",13);
+    }
+    if(msg_payload == "1")
+    {
+      WriteNum("page2.upperOD.picc",14);
+    }
+  }
+
   else if (msg_topic==base_mqtt_topic + "/States")
   {
     if (msg_payload=="Alive") 
       {
-        //put all feed back topics here
-        //debugln("Alive feed back triggered");
-        //firstLoop = 0;
+        //put all feed back topics here for this control only
         MQTTclient.publish((base_mqtt_topic + "/mLightfb").c_str(),String(light).c_str(),true);
         MQTTclient.publish((base_mqtt_topic + "/mFanfb").c_str(),String(fan).c_str(),true);      
       }
@@ -453,6 +474,7 @@ void ambientLightCheckTask(void* parameter)
   }
   vTaskDelete(NULL);                        //Task delete if error
 }
+
 void readInTemp(void* parameter)
 {
   while (1)
@@ -478,6 +500,7 @@ void readInTemp(void* parameter)
     vTaskDelay(60000);
   }
 }
+
 void debugPrint(void *pvParameters) //loop para procesos del dosificador en Core0
 {
   while (1)
@@ -495,6 +518,7 @@ void debugPrint(void *pvParameters) //loop para procesos del dosificador en Core
   }
   vTaskDelete(NULL);
 }
+
 void mfanButton()   //sets state based on input from MQTT
 {
   if (msg_payload == "toggle")
@@ -661,6 +685,7 @@ void lightTask(void* parameter)
   }
   vTaskDelete(NULL);                        //Task delete if error
 }
+
 void WriteStr(String command, String txt) 
 {
   String _component = command;
@@ -687,6 +712,7 @@ void WriteNum(String command, int val)
   _component = "";
   command = "";
 }
+
 void data_in_Nex(void* parameter)
 {
   while(1)
@@ -755,6 +781,7 @@ void data_in_Nex(void* parameter)
   }
   vTaskDelete(NULL);
 }
+
 void readTime(void* parameter)
 {
   while (1)
@@ -769,25 +796,23 @@ void readTime(void* parameter)
       }
       else
       {
-        // ///Disable motion for night
-        if(!nightTime)
+        timeHour = timeinfo.tm_hour;
+        vTaskDelay(5000);
+        
+        if ((timeHour >= lightsOn) && (timeHour < lightsOut) && nightTime)
         {
-          if((timeinfo.tm_hour <= lightsOn) && (timeinfo.tm_hour >= lightsOut))
-          {
-            nightTime = 1;
-            debugln("NightTime");
-            detachInterrupt(digitalPinToInterrupt(motionSensor));
-          }
+          nightTime = 0;
+          debugln("day");
+          //attachInterrupt(digitalPinToInterrupt(motionSensor), interruptHandler1, FALLING);
         }
-        // //enable motion for day
-        else if(nightTime)
+        
+        else if ((timeHour < lightsOn) || (timeHour >= lightsOut) && !nightTime) 
         {
-          if((timeinfo.tm_hour > lightsOn) && (timeinfo.tm_hour < lightsOut))
-          {
-            nightTime = 0;
-            debugln("day");
-            attachInterrupt(digitalPinToInterrupt(motionSensor), interruptHandler1, FALLING);
-          }
+          lightTimeout = 0;
+          snooze = 0;
+          nightTime = 1;
+          debugln("night");
+          //detachInterrupt(digitalPinToInterrupt(motionSensor));
         }
       
         char timeStringBuff[50]; //50 chars should be enough
@@ -805,9 +830,10 @@ void readTime(void* parameter)
         WriteStr("page0.time.txt",timeStringBuff);
       }
     }
-    vTaskDelay(40000);
+    vTaskDelay(35000);
   }
 
   vTaskDelete(NULL); 
 }
+
 
